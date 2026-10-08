@@ -16,7 +16,7 @@ variables:
   - name: GITHUB_REPO
     value: fmothe/Github-Integration-Test
   - name: TEAM_TAGS                       # tags de Azure Boards que representan equipos
-    value: frontend,backend
+    value: pink,blue
   - name: BASE_BRANCH
     value: develop
 

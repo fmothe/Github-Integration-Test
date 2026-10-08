@@ -1,0 +1,33 @@
+# Se dispara desde un Service Hook de Azure Boards (work item creado/actualizado)
+# y crea las branches correspondientes en GitHub. Ver scripts/create-branches.sh.
+trigger: none
+pr: none
+
+resources:
+  webhooks:
+    - webhook: workItemEvent              # alias usado abajo en parameters.*
+      connection: ado-workitem-webhook    # nombre de la service connection "Incoming WebHook"
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: github-branching               # contiene el secreto GITHUB_TOKEN
+  - name: GITHUB_REPO
+    value: fmothe/Github-Integration-Test
+  - name: TEAM_TAGS                       # tags de Azure Boards que representan equipos
+    value: frontend,backend
+  - name: BASE_BRANCH
+    value: develop
+
+steps:
+  - checkout: self
+    fetchDepth: 1
+
+  - bash: bash scripts/create-branches.sh
+    displayName: Crear branches en GitHub
+    env:
+      # workitem.updated trae el id en resource.workItemId; workitem.created en resource.id
+      WORK_ITEM_ID: ${{ coalesce(parameters.workItemEvent.resource.workItemId, parameters.workItemEvent.resource.id) }}
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      GITHUB_TOKEN: $(GITHUB_TOKEN)

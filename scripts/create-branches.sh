@@ -85,19 +85,39 @@ create_branch() {
   fi
 }
 
+# Agrega al work item un Hyperlink a la branch en GitHub (si todavía no lo tiene)
+link_branch() {
+  local wid=$1 branch=$2 url current body resp
+  url="https://github.com/${GITHUB_REPO}/tree/${branch}"
+  current=$(ado "${ADO_API}/${wid}?\$expand=relations&api-version=7.1")
+  if jq -e --arg u "$url" 'any((.relations // [])[]; .url == $u)' <<<"$current" >/dev/null; then
+    echo "Link ya presente en #$wid: $url"
+    return
+  fi
+  body=$(jq -nc --arg u "$url" --arg c "Branch ${branch}" \
+    '[{op: "add", path: "/relations/-", value: {rel: "Hyperlink", url: $u, attributes: {comment: $c}}}]')
+  resp=$(curl -sS -X PATCH -H "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}" \
+    -H "Content-Type: application/json-patch+json" "${ADO_API}/${wid}?api-version=7.1" -d "$body")
+  if jq -e '.id' <<<"$resp" >/dev/null 2>&1; then
+    echo "Link agregado en #$wid: $url"
+  else
+    echo "##vso[task.logissue type=warning]No se pudo linkear #$wid (¿permiso 'Edit work items' para el Build Service?): $resp"
+  fi
+}
+
 # Devuelve (stdout) el nombre de la feature branch del equipo para el Epic, creándola si falta
 ensure_feature() {
   local team=$1 epic=$2 id title existing name
   id=$(jq -r '.id' <<<"$epic")
   title=$(jq -r '.fields["System.Title"]' <<<"$epic")
-  existing=$(find_branch "feature/${team}/${id}-")
-  if [[ -n "$existing" ]]; then
-    echo "Ya existe: $existing" >&2
-    echo "$existing"
-    return
+  name=$(find_branch "feature/${team}/${id}-")
+  if [[ -n "$name" ]]; then
+    echo "Ya existe: $name" >&2
+  else
+    name="feature/${team}/${id}-$(slugify "$title")"
+    create_branch "$name" "$BASE_BRANCH" >&2
   fi
-  name="feature/${team}/${id}-$(slugify "$title")"
-  create_branch "$name" "$BASE_BRANCH" >&2
+  link_branch "$id" "$name" >&2
   echo "$name"
 }
 
@@ -137,12 +157,14 @@ elif in_list "$type" "$STORY_TYPES" || in_list "$type" "$BUG_TYPES"; then
 
   for team in "${teams[@]}"; do
     feature=$(ensure_feature "$team" "$epic")
-    existing=$(find_branch "${prefix}/${team}/${id}-")
-    if [[ -n "$existing" ]]; then
-      echo "Ya existe: $existing"
-      continue
+    branch=$(find_branch "${prefix}/${team}/${id}-")
+    if [[ -n "$branch" ]]; then
+      echo "Ya existe: $branch"
+    else
+      branch="${prefix}/${team}/${id}-$(slugify "$title")"
+      create_branch "$branch" "$feature"
     fi
-    create_branch "${prefix}/${team}/${id}-$(slugify "$title")" "$feature"
+    link_branch "$id" "$branch"
   done
 
 else
